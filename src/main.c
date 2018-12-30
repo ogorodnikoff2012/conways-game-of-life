@@ -20,6 +20,10 @@
 #include <omp.h>
 #endif
 
+#if BACKEND == MPI
+#include <mpi.h>
+#endif
+
 typedef void(*handler_t)(field_t*, workers_t*);
 
 typedef struct {
@@ -95,6 +99,42 @@ void run_io_loop(field_t* field, workers_t* workers) {
     printf("# Bye!\n");
 }
 
+#if BACKEND == MPI
+int main(int argc, char* argv[]) {
+    MPI_Init(NULL, NULL);
+
+    int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+
+    if (world_size < 3) {
+        printf("Not enough processes, halting!\n");
+        MPI_Finalize();
+        return 1;
+    }
+
+    int world_rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
+    if (world_rank == 0) {
+        print_title();
+        run_io_loop(NULL, NULL);
+        stop_emulation(NULL);
+    } else if (world_rank == 1) {
+        field_t field;
+        TRY(setup_field(argc, argv, &field));
+        workers_t workers;
+        TRY(setup_workers(&field, &workers));
+        run_controller_loop(&field, &workers);
+        destroy_workers(&workers);
+        destroy_field(&field);
+    } else {
+        run_controller_loop(NULL, NULL);
+    }
+
+    MPI_Finalize();
+    return 0;
+}
+#else
 int main(int argc, char* argv[]) {
     print_title();
     field_t field;
@@ -119,10 +159,13 @@ int main(int argc, char* argv[]) {
     }
 }
 
-#else
+#elif BACKEND == PTHREAD
     run_io_loop(&field, &workers);
+#elif BACKEND != MPI
+#error "BACKEND is not selected!"
 #endif
     destroy_workers(&workers);
     destroy_field(&field);
     return 0;
 }
+#endif
