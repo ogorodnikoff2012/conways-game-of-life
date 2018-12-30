@@ -4,6 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static inline int min(int x, int y) {
+    return x < y ? x : y;
+}
+
 const char* get_version() {
     return "0.1_openmp";
 }
@@ -78,7 +82,7 @@ void run(field_t* field, workers_t* workers) {
 void stop(field_t* field, workers_t* workers) {
     omp_set_lock(&workers->impl->cur_gen_lock);
     #pragma omp critical
-    workers->impl->required_gen = workers->impl->current_gen;
+    workers->impl->required_gen = min(workers->impl->current_gen + 1, workers->impl->required_gen);
     omp_unset_lock(&workers->impl->cur_gen_lock);
 }
 
@@ -89,7 +93,8 @@ void run_controller_loop(field_t* field, workers_t* workers) {
     int x, y;
 
     while (!workers->impl->stop_requested) {
-        while (workers->impl->required_gen > workers->impl->current_gen) {
+        while (!workers->impl->stop_requested &&
+                workers->impl->required_gen > workers->impl->current_gen) {
 
 #pragma omp parallel default(shared) private(x, y)
             for (x = 0; x < width; ++x) {

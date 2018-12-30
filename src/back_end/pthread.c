@@ -228,7 +228,8 @@ void run(field_t* field, workers_t* workers) {
 void stop(field_t* field, workers_t* workers) {
     pthread_mutex_lock(&workers->impl->mtx_cur_gen);
     pthread_mutex_lock(&workers->impl->mtx_req_gen);
-    workers->impl->required_gen = workers->impl->current_gen;
+    //workers->impl->required_gen = workers->impl->current_gen + 1;
+    workers->impl->required_gen = min(workers->impl->current_gen + 1, workers->impl->required_gen);
     pthread_cond_signal(&workers->impl->cv_req_gen);
     pthread_mutex_unlock(&workers->impl->mtx_req_gen);
     pthread_mutex_unlock(&workers->impl->mtx_cur_gen);

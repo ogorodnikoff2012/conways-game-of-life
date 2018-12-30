@@ -104,7 +104,7 @@ int main(int argc, char* argv[]) {
 
 #if BACKEND == OPENMP
 
-#pragma omp parallel default(shared) num_threads(2)
+#pragma omp parallel default(shared) num_threads(4)
 {
 #pragma omp sections
     {
