@@ -29,3 +29,6 @@ void destroy_workers(workers_t* workers);
 void dump_field(field_t*, workers_t*);
 void run       (field_t*, workers_t*);
 void stop      (field_t*, workers_t*);
+
+void run_controller_loop(field_t*, workers_t*);
+void stop_emulation(workers_t*);

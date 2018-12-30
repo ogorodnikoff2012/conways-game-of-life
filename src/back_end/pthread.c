@@ -4,7 +4,7 @@
 #include <pthread.h>
 #include <stdio.h>
 
-const int kSlaveThreadsCount = 4;
+#define kSlaveThreadsCount 4
 
 typedef struct {
     pthread_t thread_descr;

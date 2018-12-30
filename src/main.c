@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include <string.h>
 
+#define PTHREAD 1
+#define OPENMP  2
+#define MPI     3
+
 #define TRY(call) {                                             \
     const char* err_msg_internal_ = NULL;                       \
     err_msg_internal_ = ( call );                               \
@@ -11,6 +15,10 @@
         handle_error(err_msg_internal_, __FILE__, __LINE__);    \
     }                                                           \
 }
+
+#if BACKEND == OPENMP
+#include <omp.h>
+#endif
 
 typedef void(*handler_t)(field_t*, workers_t*);
 
@@ -93,7 +101,27 @@ int main(int argc, char* argv[]) {
     TRY(setup_field(argc, argv, &field));
     workers_t workers;
     TRY(setup_workers(&field, &workers));
+
+#if BACKEND == OPENMP
+
+#pragma omp parallel default(shared) num_threads(2)
+{
+#pragma omp sections
+    {
+    #pragma omp section
+    {
+        run_io_loop(&field, &workers);
+        stop_emulation(&workers);
+    }
+
+    #pragma omp section
+    run_controller_loop(&field, &workers);
+    }
+}
+
+#else
     run_io_loop(&field, &workers);
+#endif
     destroy_workers(&workers);
     destroy_field(&field);
     return 0;
