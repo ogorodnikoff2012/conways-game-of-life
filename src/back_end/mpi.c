@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define LOG DEBUG("")
+#define DEBUG(format, ...) printf("%s, %s:%d:" format "\n", __func__, __FILE__, __LINE__, ## __VA_ARGS__)
+
 static inline int min(int x, int y) {
     return x < y ? x : y;
 }
@@ -54,6 +57,7 @@ static inline int get_io_rank() {
 }
 
 const char* setup_workers(field_t* field, workers_t* workers) {
+    LOG;
     workers->impl = calloc(1, sizeof(struct workers_internal));
     init_field(&second_field, field->width, field->height);
     workers->impl->field = field;
@@ -104,6 +108,7 @@ void run_slave_loop() {
 
     int stop_required = 0;
     while (true) {
+        LOG;
         MPI_Recv(&stop_required, 1, MPI_INT, get_master_rank(), kStopRequiredTag,
                  MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         if (stop_required == 1) {
@@ -141,7 +146,7 @@ void run_slave_loop() {
         next_field.buffer = temp;
 
         MPI_Send(get_cell(&field, 1, 0), (range.to - range.from + 1) * height,
-                 MPI_INT, get_master_rank(), kInitialDataTag, MPI_COMM_WORLD);
+                 MPI_INT, get_master_rank(), kDataTag, MPI_COMM_WORLD);
     }
 
     destroy_field(&field);
@@ -174,19 +179,29 @@ static void master_stop(struct workers_internal* data) {
 }
 
 void run_master_loop(struct workers_internal* data) {
+    LOG;
     int stop_required = 0;
 
     int responses_left = 0;
     char cmd;
 
-    MPI_Request request;
-    MPI_Status status;
+//    MPI_Status status;
     int flag;
 
+    MPI_Request cmd_request;
+    MPI_Request* slave_request = calloc(data->ranges_cnt, sizeof(MPI_Request));
+
+    MPI_Irecv(&cmd, 1, MPI_BYTE, get_io_rank(), kCmdTag, MPI_COMM_WORLD, &cmd_request);
+    for (int i = 0; i < data->ranges_cnt; ++i) {
+        MPI_Irecv(get_cell(data->next_field, data->ranges[i].from, 0),
+                  (data->ranges[i].to - data->ranges[i].from + 1) *
+                  data->field->height, MPI_INT, get_slave_rank(i), kDataTag,
+                  MPI_COMM_WORLD, &slave_request[i]);
+    }
+
     while (!(stop_required && responses_left == 0)) {
-        MPI_Irecv(&cmd, 1, MPI_BYTE, get_io_rank(), kCmdTag, MPI_COMM_WORLD, &request);
         flag = 0;
-        MPI_Test(&request, &flag, &status);
+        MPI_Test(&cmd_request, &flag, MPI_STATUS_IGNORE);
         if (flag) {
             switch (cmd) {
                 case 'D': /* Dump */
@@ -203,9 +218,11 @@ void run_master_loop(struct workers_internal* data) {
                     break;
             }
             MPI_Send(&flag, 1, MPI_BYTE, get_io_rank(), kCmdTag, MPI_COMM_WORLD);
+            MPI_Irecv(&cmd, 1, MPI_BYTE, get_io_rank(), kCmdTag, MPI_COMM_WORLD, &cmd_request);
         }
 
         if (responses_left == 0 && !stop_required && data->cur_gen < data->req_gen) {
+            LOG;
             responses_left = data->ranges_cnt;
 
             field_t* temp = data->field;
@@ -213,8 +230,9 @@ void run_master_loop(struct workers_internal* data) {
             data->next_field = temp;
             ++data->cur_gen;
 
+            int false_flag = 0;
             for (int i = 0; i < data->ranges_cnt; ++i) {
-                MPI_Send(&stop_required, 1, MPI_INT, get_slave_rank(i),
+                MPI_Send(&false_flag, 1, MPI_INT, get_slave_rank(i),
                          kStopRequiredTag, MPI_COMM_WORLD);
 
                 int left_x = (data->ranges[i].from - 1 + data->field->width) %
@@ -230,17 +248,24 @@ void run_master_loop(struct workers_internal* data) {
         }
 
         for (int i = 0; i < data->ranges_cnt; ++i) {
-            MPI_Irecv(get_cell(data->next_field, data->ranges[i].from, 0),
-                      (data->ranges[i].to - data->ranges[i].from + 1) *
-                      data->field->height, MPI_INT, get_slave_rank(i), kDataTag,
-                      MPI_COMM_WORLD, &request);
             flag = 0;
-            MPI_Test(&request, &flag, &status);
+            DEBUG("%p", get_cell(data->field, data->ranges[i].from, 0));
+            MPI_Test(&slave_request[i], &flag, MPI_STATUS_IGNORE);
             if (flag) {
                 --responses_left;
+                if (!stop_required) {
+                    LOG;
+                    DEBUG("%p", get_cell(data->field, data->ranges[i].from, 0));
+                    MPI_Irecv(get_cell(data->field, data->ranges[i].from, 0),
+                              (data->ranges[i].to - data->ranges[i].from + 1) *
+                              data->field->height, MPI_INT, get_slave_rank(i), kDataTag,
+                              MPI_COMM_WORLD, &slave_request[i]);
+                    LOG;
+                }
             }
         }
     }
+    free(slave_request);
 }
 
 void run_controller_loop(field_t* field, workers_t* workers) {
@@ -264,10 +289,12 @@ void destroy_workers(workers_t* workers) {
 }
 
 static void send_command(char cmd, int arg) {
+    LOG;
     MPI_Send(&cmd, 1, MPI_BYTE, get_master_rank(), kCmdTag, MPI_COMM_WORLD);
     if (cmd == 'R') {
         MPI_Send(&arg, 1, MPI_INT, get_master_rank(), kDataTag, MPI_COMM_WORLD);
     }
+    LOG;
     MPI_Recv(&cmd, 1, MPI_BYTE, get_master_rank(), kCmdTag, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 }
 
